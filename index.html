@@ -938,6 +938,21 @@ button.action{
     text-align:center;
 }
 
+.target-input.target-input-locked{
+    background:#f1f5f9;
+    color:#475569;
+    border-color:#94a3b8;
+    cursor:not-allowed;
+}
+
+.target-lock-note{
+    margin-top:7px;
+    text-align:center;
+    color:#64748b;
+    font-size:11px;
+    font-weight:700;
+}
+
 .capaian-value{
 
     font-size:30px;
@@ -3719,7 +3734,7 @@ body.portal-home-active .header{
                     type="number"
                     min="2000"
                     max="2100"
-                    onchange="renderSasaran()"
+                    onchange="renderSasaran(); siapkanImporSasaranExcel()"
                 >
 
             </div>
@@ -7802,13 +7817,17 @@ function renderPilihanDesaImportSasaran(){
 
 function siapkanImporSasaranExcel(){
     const desa = getDesaImportSasaran();
+    const tahun = Number(document.getElementById("tahunSasaran")?.value) || tahunSekarang();
     const file = document.getElementById("fileAgregatDesa");
     const status = document.getElementById("statusImportExcelSasaran");
     const hasil = document.getElementById("hasilImportExcelSasaran");
+    const dataDesa = getDesaKader();
+    const desaData = dataDesa.find(item => item.nama === desa);
+    const terkunci = !!desa && sasaranTahunSudahTersimpan(desaData,tahun);
 
     if(file){
-        file.disabled = !desa;
-        if(!desa){
+        file.disabled = !desa || terkunci;
+        if(!desa || terkunci){
             file.value = "";
         }
     }
@@ -7818,9 +7837,13 @@ function siapkanImporSasaranExcel(){
     }
 
     if(status){
-        status.innerHTML = desa
-            ? `Desa yang dipilih: <strong>${escapeHtml(desa)}</strong>. Silakan pilih file Excel agregat untuk desa tersebut.`
-            : 'Pilih desa terlebih dahulu, kemudian pilih file Excel agregat desa tersebut. Sistem akan membaca kolom <strong>No KK</strong> dan menghitung jumlah KK yang terisi pada file.';
+        if(!desa){
+            status.innerHTML = 'Pilih desa terlebih dahulu, kemudian pilih file Excel agregat desa tersebut. Sistem akan membaca kolom <strong>No KK</strong> dan menghitung jumlah KK yang terisi pada file.';
+        }else if(terkunci){
+            status.innerHTML = `🔒 Sasaran Desa <strong>${escapeHtml(desa)}</strong> untuk tahun <strong>${tahun}</strong> sudah tersimpan. Pengisian melalui Excel dikunci agar sasaran tidak dapat ditambah atau ditimpa. Gunakan <strong>Hapus Sasaran Tahun</strong> bila perlu mengisi ulang.`;
+        }else{
+            status.innerHTML = `Desa yang dipilih: <strong>${escapeHtml(desa)}</strong>. Silakan pilih file Excel agregat untuk desa tersebut.`;
+        }
     }
 }
 
@@ -7898,6 +7921,15 @@ async function imporSasaranDariExcel(input){
 
     if(!desaDipilih){
         if(status) status.textContent = "❌ Pilih desa terlebih dahulu sebelum memilih file Excel.";
+        input.value = "";
+        return;
+    }
+
+    const tahunSaatIni = Number(document.getElementById("tahunSasaran")?.value) || tahunSekarang();
+    const desaSaatIni = getDesaKader().find(item => item.nama === desaDipilih);
+
+    if(sasaranTahunSudahTersimpan(desaSaatIni,tahunSaatIni)){
+        if(status) status.innerHTML = `🔒 Sasaran Desa <strong>${escapeHtml(desaDipilih)}</strong> untuk tahun <strong>${tahunSaatIni}</strong> sudah tersimpan dan terkunci. File Excel tidak dapat menimpa sasaran yang sudah ada.`;
         input.value = "";
         return;
     }
@@ -8012,6 +8044,20 @@ function getTargetDesa(
 
 }
 
+function sasaranTahunSudahTersimpan(desa,tahun){
+
+    return !!(
+        desa &&
+        desa.sasaranByYear &&
+        typeof desa.sasaranByYear === "object" &&
+        Object.prototype.hasOwnProperty.call(
+            desa.sasaranByYear,
+            String(tahun)
+        )
+    );
+
+}
+
 
 function renderSasaran(){
 
@@ -8047,6 +8093,12 @@ function renderSasaran(){
                     tahun
                 );
 
+            const sasaranTerkunci =
+                sasaranTahunSudahTersimpan(
+                    desa,
+                    tahun
+                );
+
             const card =
                 document.createElement(
                     "div"
@@ -8074,16 +8126,25 @@ function renderSasaran(){
 
                     <input
                         id="sasaran_${index}"
-                        class="target-input"
+                        class="target-input${sasaranTerkunci ? " target-input-locked" : ""}"
                         type="number"
                         min="0"
                         inputmode="numeric"
                         value="${sasaran}"
+                        ${sasaranTerkunci ? "readonly aria-readonly=\"true\" title=\"Sasaran tahun ini sudah tersimpan dan terkunci.\"" : ""}
                         oninput="updateTotalSasaranPreview()"
                     >
 
+                    ${sasaranTerkunci ? `
+                    <div class="target-lock-note">
+                        🔒 Sasaran tahun ${tahun} sudah tersimpan dan terkunci.
+                    </div>` : ""}
+
                     <div class="target-info">
-                        Sasaran desa dapat diisi otomatis dari Excel dan tetap dapat diedit. Total sasaran Kecamatan Singkep Pesisir dihitung otomatis.
+                        ${sasaranTerkunci
+                            ? "Sasaran yang sudah tersimpan tidak dapat ditambah atau diubah. Gunakan Hapus Sasaran Tahun untuk membuka kembali pengisian."
+                            : "Sasaran desa dapat diisi manual atau otomatis dari Excel. Setelah disimpan, sasaran tahun tersebut akan terkunci."}
+                        Total sasaran Kecamatan Singkep Pesisir dihitung otomatis.
                     </div>
 
                 </div>
@@ -8203,6 +8264,20 @@ function simpanSasaran(){
                 desa.sasaranByYear =
                     {};
 
+            }
+
+            /*
+               Sasaran yang sudah tersimpan tidak boleh
+               ditambah/diubah lagi saat tombol Simpan ditekan.
+               Penguncian berlaku per desa dan per tahun.
+            */
+            if(
+                sasaranTahunSudahTersimpan(
+                    desa,
+                    tahun
+                )
+            ){
+                return;
             }
 
 
@@ -11095,7 +11170,7 @@ document.addEventListener(
 
         renderDataByName();
 
-        /* Portal: gunakan status "Ingat Password" untuk auto-login pada perangkat yang sama. */
+        /* Portal: selalu tampilkan kembali dashboard login saat halaman dibuka/reload. */
         const remembered = localStorage.getItem(PORTAL_REMEMBER_KEY) === "1";
         const portalSettingsNow = getPortalSettings();
         const auth = document.getElementById("portalAuth");
@@ -11106,20 +11181,13 @@ document.addEventListener(
             rememberBox.checked = remembered && portalSettingsNow.rememberEnabled !== false;
         }
 
+        /* Jangan melewati halaman login otomatis, meskipun "Ingat Password" tersimpan. */
+        localStorage.removeItem(PORTAL_AUTH_KEY);
         document.body.classList.remove("portal-home-active");
-
-        if(remembered && portalSettingsNow.rememberEnabled !== false){
-            localStorage.setItem(PORTAL_AUTH_KEY,"1");
-            if(auth) auth.style.display = "none";
-            bukaBeranda();
-            mulaiJamPortal();
-        }else{
-            localStorage.removeItem(PORTAL_AUTH_KEY);
-            if(home) home.style.display = "none";
-            if(auth) auth.style.display = "flex";
-            sembunyikanSemuaPanel();
-            document.getElementById("portalPassword")?.focus();
-        }
+        if(home) home.style.display = "none";
+        if(auth) auth.style.display = "flex";
+        sembunyikanSemuaPanel();
+        document.getElementById("portalPassword")?.focus();
 
     }
 );
